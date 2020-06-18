@@ -1,0 +1,14 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: es-demo
+  data:
+    elasticsearch:
+      client:
+        reactive: localhost:9200
+      repositories:
+        enabled: true
+
+
