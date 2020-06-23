@@ -239,9 +239,522 @@ ES有很多应用场景，大家最熟悉也最有可能用到的就是搜索引
 
 ## 为什么要用Kibana操作ES呢？
 
-1. 你会一直用代码去操作Oracle、MySQL、Mongo、Redis吗？不会，你会找一个工具来方便直接操作数据库，那么用Kibana操作ES就是这么一个工具；
+1. 你会一直用代码去操作Oracle、MySQL、Mongo、Redis吗？
+不会，你会找一个工具来方便直接操作数据库，那么用Kibana操作ES就是这么一个工具；
 
-1. 在Kibana里快速了解与实践ES有哪些接口、分别能做什么，加深对其返回数据结构的了解；
+1. 在Kibana里快速了解与实践ES有哪些接口、分别能做什么，加深对其功能与数据结构的了解；
+
+## 找到Kibana的ES操作面板
+- 在浏览器访问你的Kibana地址(我本机是 localhost:5601)；
+- 在左侧导航菜单找到Dev Tools并点击；
+- 看到一个左右分栏的页面, 现在我们在左分页输入一个指令看看
+`GET /_cat/health?v`
+这是查看ES的健康状况，如果使用的是单节点，状态会始终是 yellow 不会是 green。想要绿还得多节点运动。
+
+## 创建一个索引
+
+### 直接插入一条数据来自动创建索引
+
+- 当插入一条数据时，如果ES原本没有这个index，系统默认会自动创建该索引，我们来试试：
+
+```javascript
+PUT /customer/_doc/1
+{
+  "name": "乔尔",
+  "des": "最后生还者的主角",
+  "game": "The last of us"
+}
+```
+你会得到下面的返回：
+
+```javascript
+{
+  "_index" : "customer",
+  "_type" : "_doc",
+  "_id" : "1",
+  "_version" : 2,
+  "result" : "created",
+  "_shards" : {
+    "total" : 2,
+    "successful" : 1,
+    "failed" : 0
+  },
+  "_seq_no" : 1,
+  "_primary_term" : 1
+}
+```
+- 我们来查询一下该数据是否已存在：
+
+```javascript
+GET customer/_doc/1
+```
+返回回来了：
+
+```javascript
+{
+  "_index" : "customer",
+  "_type" : "_doc",
+  "_id" : "1",
+  "_version" : 2,
+  "_seq_no" : 1,
+  "_primary_term" : 1,
+  "found" : true,
+  "_source" : {
+    "name" : "乔尔",
+    "des" : "最后生还者的主角",
+    "game" : "The last of us"
+  }
+}
+```
+是的，老乔尔在这里了，还没有被干掉，向乔尔敬个礼，最后生还者2的编剧夹带了太多私货，还有天理吗？还有王法吗？这样做你的良心不会痛吗？
+不能像我一样做个不加带私货，就单纯讲讲技术~~（私货）~~ 的人吗。
+
+![在这里插入图片描述](https://imgconvert.csdnimg.cn/aHR0cHM6Ly90aW1nc2EuYmFpZHUuY29tL3RpbWc_aW1hZ2UmcXVhbGl0eT04MCZzaXplPWI5OTk5XzEwMDAwJnNlYz0xNTkyODk0Mjg4NDUwJmRpPTZjOWQ1ZDJhNzBiZDBkNTBlNGY4ZTViYzc4NGYyNzRkJmltZ3R5cGU9MCZzcmM9aHR0cDovL3d3dy5rZWRvLmdvdi5jbi91cGxvYWQvcmVzb3VyY2VzL2ltYWdlLzIwMTUvMDgvMTgvOTg1MjYuanBnI3BpY19jZW50ZXI?x-oss-process=image/format,png#pic_center)
+
+ - 使用过旧版ES的老司机会纠结type，在ES7开始已经取消了type，_doc在API里也是一个关键字，类似效果的还有下面这个API：
+ 
+
+```javascript
+//将_doc替换成了_create, 再次提交该请求时，会提示该document已存在
+PUT /customer/_create/2
+{
+  "name": "艾莉",
+  "des": "最后生还者的女主角",
+  "game": "The last of us"
+}
+```
+是不是很方便，不用像关系型数据库一样还要建表，直接插入数据就表也有了，数据也有了，有了这样的电动车还要啥自行车？
+
+![在这里插入图片描述](https://imgconvert.csdnimg.cn/aHR0cHM6Ly90aW1nc2EuYmFpZHUuY29tL3RpbWc_aW1hZ2UmcXVhbGl0eT04MCZzaXplPWI5OTk5XzEwMDAwJnNlYz0xNTkyODk1ODM4NTU0JmRpPTY5MDA4ZmQ1ZDM5YmEwZmFhNjQ1M2QzNWNlNTdkMTQ3JmltZ3R5cGU9MCZzcmM9aHR0cDovL3AyLnNzbC5jZG4uYnRpbWUuY29tL3QwMTkzZWY1MTRlZTlmMmRjMGMuZ2lmP3NpemU9MjQweDI0MA)
+自行车还是要的，毕竟电动车还要电，没电的时候怎么办呢？难道用爱发电？不要骗自己了，程序员哪里有爱？所以我们一起来看看自行车吧。
+
+### 正儿八经创建一个index
+之前怎么就不正儿八经了？
+![在这里插入图片描述](https://imgconvert.csdnimg.cn/aHR0cHM6Ly90aW1nc2EuYmFpZHUuY29tL3RpbWc_aW1hZ2UmcXVhbGl0eT04MCZzaXplPWI5OTk5XzEwMDAwJnNlYz0xNTkyODk2MTczNzUxJmRpPWJiYzcwNDUwOGFlMDYwOGMzZDFkMTY4OTEyNTk5MDBiJmltZ3R5cGU9MCZzcmM9aHR0cDovL2ltZy5pdGx1bi5jbi91cGxvYWRzL2FsbGltZy8xNjExMTUvMS0xNjExMTUxOTMxNTQtbHAuanBn?x-oss-process=image/format,png)
+ES的数据存入后，还记得前言中数据入库到建立索引的过程吗？一大精华就是如何将你的数据建立索引，如果你不告诉ES，他是不知道的，那么就只能自己匹配了，在简单的应用场景下没有什么问题，可是如果想把你的电动车玩成酷炫的改装痛车，那么就要为你的每个零件做定制，现在我们就先来看看如何为不同字段指定类型。
+
+我们先删除刚才创建的index：
+
+```javascript
+DELETE /customer
+```
+
+接下来我们重新建立索引 character：
+
+```javascript
+PUT /character
+{
+    "settings" : {
+        "number_of_shards" : 1
+    },
+    "mappings" : {
+        "properties" : {
+            "name" : { "type" : "keyword" },
+            "des" : { "type" : "text" },
+            "game" : { "type" : "text" },
+            "age" : { "type" : "integer" }
+        }
+    }
+}
+```
+上面的命令让我们建立了一个新的index -> character，其中的mappings下的properties，我们指定了字段的属性，我们将name的属性设为keyword，那么它将不会进行分词，而是整个被索引，这就和其他数据库的索引在效果上一样了。
+
+ES有以下这些基本类型：
+
+#### 核心数据类型：
+
+ - string
+text, keyword, wildcard
+ - Numeric
+long, integer, short, byte, double, float, half_float, scaled_float
+ - Date
+date
+ - Date nanoseconds
+date_nanos
+ - Boolean
+boolean
+ - Binary
+binary
+ - Range
+integer_range, float_range, long_range, double_range, date_range, ip_range
+
+#### 复合数据类型：
+
+ - Object
+单个json类型
+ - Nested
+一组嵌套的json类型
+
+#### 地理位置数据类型：
+
+ - Geo-point
+geo_point 经纬度坐标点
+ - Geo-shape
+geo_shape 一个多边形区域
+
+## 对index干点别的吧
+### 克隆索引
+克隆的命令很简单，不过有一些注意事项，克隆只需要这样就可以：
+
+```javascript
+// 将character克隆到character2
+POST /character/_clone/character2
+```
+**这里要注意一些前提条件**
+
+ 1. 你的ES节点健康度必须是绿的，不绿不行；
+ 2. 将现有index变为只读，如何变为只读呢？
+ 
+
+```javascript
+PUT /character/_settings
+{
+  "settings": {
+    "index.blocks.write": true
+  }
+}
+```
+### 删除与关闭index
+#### 删除
+当你想抹去某个index的存在时，就使用该命令，如果你的原始数据在别的库，ES仅仅作为一个索引库时，该操作影响相对有限，否则那就真的是从删库到跑路了：
+
+```javascript
+DELETE /character
+```
+![在这里插入图片描述](https://imgconvert.csdnimg.cn/aHR0cHM6Ly9waWMucm1iLmJkc3RhdGljLmNvbS8wYmE2OGE1ZTBjYWM1ZThlMTEzNDUxY2Y3YTNkNDc0OC5qcGVnQHdtXzIsdF81NW0rNWE2MjVZKzNMK2FXbk9hZG9PUzRsdWVWakE9PSxmY19mZmZmZmYsZmZfVTJsdFNHVnAsc3pfMTEseF83LHlfNw?x-oss-process=image/format,png)
+#### 关闭
+当你想要保留某个index又不想人读写它时，就用该命令：
+
+```javascript
+POST /character/_close
+```
+
+## 查看index
+如果已经建立了index，我们自然想要看看这个index到底存在不存在，到底长啥样，对吧。
+### 我有多少index
+在kibana中输入下面命令看看你刚才创建的index在吗？没有建或者已删库？
+
+```javascript
+GET _cat/indices
+```
+在里面看到你的index了吗？
+### 查看具体某个index
+现在你想知道某个具体的index，看看他的properties，又几个副本，什么时候创建的，以及是否有特殊settings？这个命令也很简单：
+
+```javascript
+GET character
+```
+你也可以用如下命令来判断某个index是否存在，如果存在会返回200，不存在则返回404。
+
+```javascript
+HEAD character
+```
+## 是时候来点document了
+### 自带ID的数据插入
+我们在做数据插入时，可以为数据指定ID，这样系统在存入数据时ID就会是我们传入的值，我们来看看怎么做
+
+```javascript
+//PUT /{index_name}/_doc/{id}
+PUT /character/_doc/2
+{
+  "name": "艾莉",
+  "des": "最后生还者的女主角",
+  "game": "The last of us 2",
+  "age": 16
+}
+```
+这里的返回数据会告诉我们，数据的ID为2，那么我们如果不指定ID呢？不指定的时候会怎样呢？让我们来看看，老乔尔走起：
+### 自动生成ID
+```javascript
+//这里我们将请求方式改为了POST，因为这里一定是创建，URI最后没有ID
+POST /character/_doc/
+{
+  "name" : "乔尔",
+  "des" : "最后生还者的主角",
+  "game" : "The last of us",
+  "age": 46
+}
+```
+我们来看看返回数据：
+
+```javascript
+{
+  "_index" : "character",
+  "_type" : "_doc",
+  "_id" : "Rpvl33IB_-zdUMCBv_pD",
+  "_version" : 1,
+  "result" : "created",
+  "_shards" : {
+    "total" : 2,
+    "successful" : 1,
+    "failed" : 0
+  },
+  "_seq_no" : 1,
+  "_primary_term" : 1
+}
+```
+ID是一串随机生成的字符串，当然我们可以修改ID的激活规则，自动生成ID的规则由settings中的action.auto_create_index控制：
+
+```javascript
+// 这个命令表示character使用自动生成ID，以customer开头的关闭自动生成ID，以user开头的使用自增ID
+PUT _cluster/settings
+{
+    "persistent": {
+        "action.auto_create_index": "character,-customer*,+user*" 
+    }
+}
+
+PUT _cluster/settings
+{
+    "persistent": {
+        "action.auto_create_index": "false" 
+    }
+}
+
+PUT _cluster/settings
+{
+    "persistent": {
+        "action.auto_create_index": "true" 
+    }
+}
+```
+### 添加超时时间
+ES的写入效率并不是特别高，在实际生产环境中，我们总要考虑网络IO的耗时以及其所带来的线程占用及可能的应用崩溃，而在微服务中不考虑这样的问题甚至可能造成系统的雪崩，所以我们希望系统能够快速失败，失败后我们可以重试也可以选择其他降级方案，ES也为我们提供了这样的能力，可以让我们快速失败：
+
+```javascript
+//我们在URI后添加了timeout，如果3s还没响应则会返回我们超时
+POST character/_doc?timeout=3s
+{
+  "name": "艾比",
+  "des": "最后生还者2的反派，但是你却不得不操作她去杀主角，WTF。",
+  "game": "The last of us 2",
+  "age": 20
+}
+```
+## 简单查询
+### 看看这个index下的所有documents
+我们有时候就想随便看看一个数据库表中的一些数据，我们对于数据的感觉常常要看到这些数据才会有，这时候我们要怎么做呢？
+
+```javascript
+GET character/_search
+```
+不带任何参数，是不是很简单。
+### 查看具体ID的数据
+
+```javascript
+//Rpvl33IB_-zdUMCBv_pD : 乔尔的ID
+//返回乔尔的document
+GET character/_doc/Rpvl33IB_-zdUMCBv_pD
+//判断乔尔是否存在
+HEAD character/_doc/Rpvl33IB_-zdUMCBv_pD
+//只返回乔尔的数据本身
+GET character/_source/Rpvl33IB_-zdUMCBv_pD
+```
+
+### 只返回特定字段
+这时我们只要在调用时添加要返回的source字段即可：
+
+```javascript
+//我们只要知道乔尔的名字以及出自哪个游戏
+GET character/_source/Rpvl33IB_-zdUMCBv_pD?_source=name,game
+```
+现在我们已经会根据ID查询了，虽然和想象的不太一样，因为我们想要的不应该是用ID来查询，我们想要根据关键字就找到数据。
+
+不要急，我们要循序渐进让你找到感觉，这种感觉就是在轮环中前进，接下来让我们看看更高级的用于搜索的奇巧yinji（哎呀我这输入法怎么坏了打不出来了）
+![在这里插入图片描述](https://imgconvert.csdnimg.cn/aHR0cHM6Ly90aW1nc2EuYmFpZHUuY29tL3RpbWc_aW1hZ2UmcXVhbGl0eT04MCZzaXplPWI5OTk5XzEwMDAwJnNlYz0xNTkyOTA5OTg0NjcyJmRpPTA3OGQxZTE2ZmM4OGNjZWI5Y2QzMzJjMzY0NjU5OWFmJmltZ3R5cGU9MCZzcmM9aHR0cDovL3A0LnNzbC5jZG4uYnRpbWUuY29tL3QwMTc1Mzk4ZTBkMDZhYjIyNjcuZ2lmP3NpemU9Mzk5eDE3MQ)
+憋说话，开搞！
+## 复杂搜索
+### 特定属性值
+我们想要找到乔尔，但是我们并不知道他的ID，我们只记住了他的名字，可怜的老乔尔，让我们试试找到他吧。
+
+```javascript
+//我们之前用过这个_search，现在我们加上了一个新参数 -> q=name:乔尔
+GET character/_search?q=name:乔尔&_source=name,game
+```
+我们找到乔尔了，但是这样是不是会感觉比较乱？那么我们来这样试试：
+
+```javascript
+GET /character/_search
+{
+  "query": {
+    "term": {
+      "name": "乔尔"
+    }
+  }
+}
+```
+**以前有小伙伴质疑过这样的请求不是应该是POST吗? GET要跟在URI后面，其实不是这样的。**
+
+### 对返回数据做分页与排序
+我们要找到所有描述中带“最”字的数据，然后根据年轻倒序排序，并返回前两个，我们来看看怎么做吧：
+
+```javascript
+GET /character/_search
+{
+  "query": {
+    "match": {
+      "des": "最"
+    }
+  },
+  "sort": [{"age": "desc"}], 
+  "from": 0,
+  "size": 2
+}
+```
+### 复杂查询条件
+上面我们的查询条件还是比较单一，要知道再SQL里面我们可以有各种 AND, OR, NOT 以及括号操作，在这里我们要怎么办呢？
+我想要描述里带最的数据，同时年龄要大于16岁小于等于46岁的，怎么办呢？居然还有这么骚的操作？
+![在这里插入图片描述](https://imgconvert.csdnimg.cn/aHR0cHM6Ly90aW1nc2EuYmFpZHUuY29tL3RpbWc_aW1hZ2UmcXVhbGl0eT04MCZzaXplPWI5OTk5XzEwMDAwJnNlYz0xNTkyOTEzMjAwMDIyJmRpPTk0N2Q4MzI4NDUwZDU2MGNmNTI5NjM0OGZiZGM5ODZiJmltZ3R5cGU9MCZzcmM9aHR0cDovLzViMDk4OGU1OTUyMjUuY2RuLnNvaHVjcy5jb20vaW1hZ2VzLzIwMTkwNTIyL2NmOWU3MzFmMGQ0YTRiZmU4YTk2YmYwMWY2MjE3YTFkLmpwZWc?x-oss-process=image/format,png)
+那么我们来看看怎么在查询中满足要求：
+
+```javascript
+GET /character/_search
+{
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "match": {
+            "des": "最后"
+          }
+        }
+      ],
+      "filter": [
+        {
+          "range": {
+            "age": {
+              "gt": 16,
+              "lte": 46
+            }
+          }
+        }  
+      ]
+    }
+  },
+  "sort": [{"age": "desc"}], 
+}
+```
+
+ - bool 关键字表示我们要进行组合查询；
+ - must 表示里面的条件都要满足，类似于SQL的AND关键字；
+ - should 表示其中的条件满足其一就可以，类似于SQL的OR；
+ - must_not 表示不需要满足该条件，类似于SQL的NOT；
+ - 这里我们使用了与 must 并列的 filter，这里面可以输入多个条件，它只是根据条件做数据过滤，不进行打分等操作，在性能上优于match的查询，因此如果我们需要快速缩小查询范围时，就可以用filter。
+ 
+ ### 模糊搜索与同义词搜索
+ #### 模糊搜索
+ 当我们在query中使用 match 时，他默认已经支持了模糊搜索，这里的模糊搜索与我们在关系型数据库中的含义不太一样，在关系型数据库里表示我们要使用 LIKE 了，但是在ES里，表示我们输错了一两个字，它依然帮我们把数据找出来。
+ 让我们试试下面的搜索条件：
+ 
+
+```javascript
+GET /character/_search
+{
+  "query": {
+    "match": {
+      "des": "最后生活者"
+    }
+  }
+}
+```
+我们的数据依然返回了，但是大家看到几条数据的score值，都没有满分，因为我们有错别字。
+
+#### 同义词
+该功能的使用需要对同义词做一些配置，这样我们就可以简化搜索，比如：
+tlou = the last of us
+这里我们不对这一块深入讲解了，因为其难点不在使用。
+
+### 同一关键字在不同字段匹配
+这个可以认为时对于 bool 操作的简化，我们来试一试：
+
+```javascript
+GET /character/_search
+{
+  "query": {
+    "multi_match": {
+      "query": "最后生活者",
+      "fields": ["game", "des"]
+    }
+  }
+}
+```
+## 删除数据
+到这里，已经很累了，感觉已经精疲力尽了，饭也没吃厕所也没上的写，我们终于要开始做数据删除了，这个篇章也就快要接近收尾了。
+![在这里插入图片描述](https://imgconvert.csdnimg.cn/aHR0cHM6Ly9zczMuYmRzdGF0aWMuY29tLzcwY0Z2OFNoX1ExWW54R2twb1dLMUhGNmhoeS9pdC91PTEzNjM1MjUxMDMsMjEwNDM1OTU1MCZmbT0yNiZncD0wLmpwZw?x-oss-process=image/format,png#pic_center)
+### 根据ID删除数据
+这个语法比较简单，不过要注意不要一不小心删除了整个index
+
+```javascript
+//删除ID为1的角色
+DELETE /character/_doc/1
+```
+
+### 根据查询条件删除
+我们来让艾比离开最后生还者的世界吧：
+
+```javascript
+POST character/_delete_by_query
+{
+  "query": {
+    "match": {
+      "name": "艾比"
+    }
+  }
+}
+```
+这样艾比就不见了，我们用_search去找时，再也找不到她了，TLOU的世界清净了。
+是不是似曾相识的语法? 如果你很好的掌握了上面的复杂查询，那么这里将没有任何难度。
+BTW，如果艾比的形象和艾莉丝与蒂法差不多，我们还是可以让她留下来并且接受她成为主角。
+![在这里插入图片描述](https://imgconvert.csdnimg.cn/aHR0cHM6Ly9zczEuYmRzdGF0aWMuY29tLzcwY0Z1WFNoX1ExWW54R2twb1dLMUhGNmhoeS9pdC91PTIzMDcyMDI0NzQsMjI5ODE4NzI1OSZmbT0yNiZncD0wLmpwZw?x-oss-process=image/format,png#pic_center)
+## 更新数据
+### 根据ID覆盖原数据
+这个操作会根据id，覆盖原本的数据，不会只修改你提交的字段：
+
+```javascript
+PUT /character/_doc/2
+{
+  "des": "最后生还者1和2的女主角，在2的表现让人失望",
+  "age": 16
+}
+```
+这样提交后，ID为2的数据，就没有name与game属性了，那么显然这不是我们想要的。
+### 只修改有变动的自动
+通常我们只想要修改要改变的字段，没有变动的字段保持原样，那么我们该怎么做呢？
+```javascript
+POST /character/_update/2
+{
+  "doc": {
+    "des": "最后生还者1和2的女主角，在2的表现让人失望",
+    "age": 18
+  }
+}
+```
+这样提交后原本的name与game属性则不会发生变化。
+### 根据查询条件进行数据修改
+是的，现在我们并不知道数据的ID，我们想要找到艾莉，在我们写这段分享的漫长过程中，艾莉又长大了一岁，真是光阴似箭岁月如梭，艾莉已经19岁了，我们应该怎么办呢？
+
+```javascript
+POST character/_update_by_query
+{
+  "script": {
+    "source": "ctx._source['age'] = 19"
+  },
+  "query": {
+    "match": {
+      "name": "艾莉"
+    }
+  }
+}
+```
+query的部分依然参考上面的复杂查询模块，script是一个新知识点，但是我们也不做展开了，我们只要理解 "source": "ctx._source['age'] = 19" 是将查询到的数据的age字段改为19就可以了。
+
+关于通过Kibana进行ES的CRUD操作，我们就介绍到这里了，不知不觉这已经是一篇万字长文了。
+
+下一步，我们就要移步到通过 Springboot 与 Spring Data Elasticsearch 来使用ES了。想想还有些小激动，是不是。
+![在这里插入图片描述](https://imgconvert.csdnimg.cn/aHR0cHM6Ly90aW1nc2EuYmFpZHUuY29tL3RpbWc_aW1hZ2UmcXVhbGl0eT04MCZzaXplPWI5OTk5XzEwMDAwJnNlYz0xNTkyOTE5MDk2Mzk1JmRpPTY0MTM4YzlmNTNkNGUwYjU0OWI4ZWRkOGIxNzI2N2E2JmltZ3R5cGU9MCZzcmM9aHR0cDovL2ltYWdlLmJpdGF1dG8uY29tL2RlYWxlci9uZXdzLzEwMDA0NjM5NC9jMzRjMDVjNS1iZGMwLTRmMDQtOTQwYy1hOWUxNTViYTVhODMuanBn?x-oss-process=image/format,png)
+基础知识还要补充的小伙伴请前往：
+[ElasticSearch 7.x with Springboot 2.3.x - 前言](https://blog.csdn.net/weixin_42288219/article/details/106883402)
+[ElasticSearch 7.x with Springboot 2.3.x - 基础准备](https://blog.csdn.net/weixin_42288219/article/details/106908129)
 
 # 让Springboot与ES结合
 
