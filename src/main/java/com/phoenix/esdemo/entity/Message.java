@@ -4,11 +4,13 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.springframework.context.annotation.Bean;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.elasticsearch.annotations.DateFormat;
 import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
+
+import java.time.Instant;
 
 @Document(indexName = "dalex")
 @Setter
@@ -30,8 +32,8 @@ public class Message {
     private String sender;
     @Field(type = FieldType.Integer)
     private Integer type;
-    @Field(type = FieldType.Date)
-    private String sendDate;
+    @Field(type = FieldType.Date, format = DateFormat.basic_date_time)
+    private Instant sendDate;
     @Field(index = false)
     private String icon;
 }
