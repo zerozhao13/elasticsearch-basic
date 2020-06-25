@@ -9,6 +9,7 @@ import org.springframework.data.elasticsearch.annotations.DateFormat;
 import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
+import org.springframework.lang.NonNull;
 
 import java.time.Instant;
 
@@ -23,6 +24,7 @@ import java.time.Instant;
  */
 public class Message {
     @Id
+    @NonNull
     private String id;
     @Field(type = FieldType.Text, analyzer = "ik_max_word")
     private String title;
