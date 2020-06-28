@@ -8,6 +8,11 @@ import org.springframework.data.elasticsearch.client.reactive.ReactiveRestClient
 import org.springframework.data.elasticsearch.config.AbstractReactiveElasticsearchConfiguration;
 import org.springframework.data.elasticsearch.repository.config.EnableReactiveElasticsearchRepositories;
 
+/**
+ * @Author: zero
+ * @Date: 20200628
+ * 方法配置了ES Data的响应式客户端，并通过注解启用ReactiveElasticsearchRepositories
+ */
 @Configuration
 @EnableReactiveElasticsearchRepositories
 public class ReactiveElasticsearchConfig extends AbstractReactiveElasticsearchConfiguration {

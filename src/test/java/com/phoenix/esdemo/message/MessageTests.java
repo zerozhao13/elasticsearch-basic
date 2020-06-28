@@ -14,6 +14,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -22,15 +23,16 @@ import static org.junit.jupiter.api.Assertions.*;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class MessageTests {
 
+  final String tstId = "for-save-and-delete";
+  // 消息类型的type临时赋值，在该用例中默认不会大于该值
+  int tmpType = 1000;
   @Autowired private MessageRepository msgRep;
   @Autowired private ReactiveMessageRepository ractMsgRep;
-
-  private long recordCount = 0;
-  int tmpType = 1000;
 
   @AfterAll
   static void deleteAllMsg() {}
 
+  // 清空数据并验证数据条数是否已为0
   @Order(0)
   @Test
   @DisplayName("清空所有数据")
@@ -52,27 +54,30 @@ public class MessageTests {
   // @CsvFileSource(resources = "/messages.csv")
   @DisplayName("初始化数据")
   void initTest(String title, String msg, String sender, Integer type, String icon) {
-    recordCount++;
+    // 每插入一条数据记录数加一
     String uuid = UUID.randomUUID().toString();
     Instant time = Instant.now();
     Message message = new Message(uuid, title, msg, sender, type, time, icon);
+    // 用响应式保存一条新的message并获取返回数据
     Mono<Message> monoMsg = ractMsgRep.save(message);
     Message savedMsg = monoMsg.block();
+    // 对比存入后返回的数据与传入参数的诗句title是否一致
     assertEquals(message.getTitle(), savedMsg.getTitle(), "Title一致");
   }
 
+  // 每个用例执行前输出一行提示信息
   @BeforeEach
   void beforeTests(TestInfo testInfo) {
     System.out.print(testInfo.getDisplayName() + " : 测试即将开始");
   }
 
   @DisplayName("保存新的消息")
-  @Order(2)
+  @Order(3)
   @Test
   void saveDoc() {
     Message msg =
         new Message(
-            "99",
+            tstId,
             "who博士",
             "和dalex对战了很多年",
             "时间领主",
@@ -86,16 +91,54 @@ public class MessageTests {
         () -> assertEquals(savedMsg.getSender(), msg.getSender()));
   }
 
-  @DisplayName("通过Flux获取所有消息")
-  @Order(3)
+  @DisplayName("更新消息")
+  @Order(4)
   @Test
-  void getReactiveMsg() {
+  void updateMsg() {
+    Optional<Message> optionalMessage = msgRep.findById(tstId);
+    Message msg = optionalMessage.get();
+    String title = msg.getTitle();
+    String newTitle = "胡博士与宋江";
+    msg.setTitle(newTitle);
+    Message savedMsg = msgRep.save(msg);
+    assertAll(
+        "msg",
+        () -> assertEquals(savedMsg.getTitle(), newTitle),
+        () -> assertNotEquals(savedMsg.getTitle(), title),
+        () -> assertEquals(savedMsg.getId(), tstId));
+  }
+
+  @DisplayName("删除消息")
+  @Order(5)
+  @Test
+  void delMsg() {
+    // 看看该消息是否存在
+    boolean existMsgBeforeDel = msgRep.existsById(tstId);
+    // 删除该消息
+    msgRep.deleteById(tstId);
+    // 看看该消息是否还存在
+    boolean existMsgAfterDel = msgRep.existsById(tstId);
+    assertAll(
+        "exist msg", () -> assertTrue(existMsgBeforeDel), () -> assertFalse(existMsgAfterDel));
+  }
+
+  @DisplayName("获取消息条数")
+  @Order(2)
+  @Test
+  void getMsgQuantity() {
+    // 通过响应式方式获取所有消息
     Flux<Message> msg = ractMsgRep.findAll();
-    System.out.println("共有消息 ： " + msg.count().block().longValue());
+    // 通过一般方式获取消息条数
+    long msgCount = msgRep.count();
+    System.out.println("共有消息，msg.count() ： " + msg.count().block().longValue());
+    System.out.println("共有消息，msgCount ： " + msgCount);
+    // 如果数据量特别多这个断言是会失败的，因为findAll如果不加分页，则其会默认最多1000条
+    assertTrue(
+        (msg.count().block().longValue() == msgCount), "消息条数符合预期");
   }
 
   @DisplayName("获取运营发的消息")
-  @Order(4)
+  @Order(7)
   @Test
   void getMesFromSenderOps() {
     String sender = "运营";
@@ -108,6 +151,7 @@ public class MessageTests {
               System.out.println("发送者是: " + message.getSender());
               System.out.println("消息是: " + message.getMsg());
               System.out.println("类型是: " + message.getType());
+              System.out.println("tmp类型是: " + tmpType);
               assertEquals(sender, message.getSender(), "发送者是: " + message.getSender());
               assertTrue(tmpType >= message.getType());
               tmpType = message.getType();

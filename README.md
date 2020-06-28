@@ -761,3 +761,395 @@ query的部分依然参考上面的复杂查询模块，script是一个新知识
 *Springboot 与 Spring data elasticsearch 为我们做了很多封装，有兴趣的小伙伴也可以试试自己直接在java中去操作ES，也不难就是麻烦一些，但是更有利于理解外部系统如何与ES交互。*
 
 *这里我们不涉及这一块主要是在生产环境中我们不太会这么干，能少写代码就少写，不要折腾自己，节约出来的时间与精力可以喝个下午茶，想想怎么创新，好好感受一下这宝贵的一去不复返的人生。*
+
+如何将ES运用到我们的程序中呢？我们将从集成、配置、体验其接口步步展开，其中会涉及到一些TDD的东西，不过不用太担心，因为TDD不是这里的重点，我们的重点将围绕 Springboot 2.3 + Spring Data Elastisearch 4 + ES 7.7 展开。
+
+Springboot 与 Spring data elasticsearch 为我们做了很多封装，有兴趣的小伙伴也可以试试自己直接在java中去操作ES，也不难就是麻烦一些，但是更有利于理解外部系统如何与ES交互。
+
+我们去做应用去实现业务，在结构良好的情况下能少写代码就少写，不要折腾自己，节约出来的时间与精力可以喝个下午茶，想想怎么创新，好好感受一下这宝贵的一去不复返的人生。
+
+## 添加项目依赖
+### 新建项目
+如果是新建项目，基于springboot那就通过initializer来建立新项目，不要自己去折腾手写，除非我们要添加与依赖的包是initializer里面没有的。
+
+版本我们选择springboot2.3.1，找到NoSQL选中spring data elasticsearch就可以了。
+### 已有项目新增ES
+可以通过依赖管理器选择新增，如果需要手工添加依赖，则添加如下代码片段在pom文件中：
+
+```javascript
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
+</dependency>
+```
+如果使用的不是springboot项目，那么需要自己将上述starter中的依赖添加进项目，并且看看是否有版本冲突（如果是比较老的项目，建议不要参考本分享进行ES操作，因为一些API可能已经变了）
+### 分享案例中的其他依赖
+本分享中因为还涉及到了一些反应式编程以及为了减少一些代码编写，所以还添加了一点外部依赖，不添加不会影响对ES的基本使用，分享中我们会分开来讲，因此不关注不依赖也没关系。
+
+```javascript
+<!-- 对reactor的支持 -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webflux</artifactId>
+</dependency>
+<!-- lombok来减少部分代码编写 -->
+<dependency>
+    <groupId>org.projectlombok</groupId>
+    <artifactId>lombok</artifactId>
+    <optional>true</optional>
+</dependency>
+```
+## 工程结构
+无论是学习还是做项目，先确定结构都是最重要的，之后把内容往结构里面填才会井然有序。
+有些小朋友喜欢一上来先弄内容，把东西一股脑一塞，一看功能也实现了，但是以后要梳理起来就比较难了，最主要的没有美感了，就像摄影与绘画，你首先得学构图，然后才是色彩与光影。
+
+```javascript
+src
+--main
+	--java
+		--config
+			--ReactiveElasticsearchConfig.java //配置ReactiveElasticsearch客户端
+		--entity
+			--Message.java //用于管理要存入ES的实体，我们的例子使用的是消息
+		--repository
+			--MessageRepository.java //继承ElasticsearchRepository，通过Spring Data ES对ES进行操作
+			--ReactiveMessageRepository.java //通过ReactiveESRepository进行响应式操作
+		--EsDemoApplication.java
+	--resources //配置文件
+--test
+	--java
+		--message
+			--MessageTests.java //message测试用例
+	--resources //junit测试数据外部文件存放地址
+		--messages.cvs
+```
+## 配置信息
+### 通过application.yml
+
+```yaml
+server:
+  port: 8090
+
+spring:
+  application:
+    name: es-demo
+  data:
+    elasticsearch:
+      client:
+        reactive: localhost:9200
+      repositories:
+        enabled: true
+```
+这个配置与以往的版本有些不同，有小伙伴要使用high level rest client来配置效果也是一样的。
+配置里面的更多配置信息大家可以自己去尝试，比如超时时间等，如果ES采用了集群，多个地址以逗号分隔即可。
+
+### 通过java配置文件配置
+
+```java
+package com.phoenix.esdemo.config;
+
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.elasticsearch.client.ClientConfiguration;
+import org.springframework.data.elasticsearch.client.reactive.ReactiveElasticsearchClient;
+import org.springframework.data.elasticsearch.client.reactive.ReactiveRestClients;
+import org.springframework.data.elasticsearch.config.AbstractReactiveElasticsearchConfiguration;
+import org.springframework.data.elasticsearch.repository.config.EnableReactiveElasticsearchRepositories;
+
+/**
+ * @Author: zero
+ * @Date: 20200628
+ * 方法配置了ES Data的响应式客户端，并通过注解启用ReactiveElasticsearchRepositories
+ */
+@Configuration
+@EnableReactiveElasticsearchRepositories
+public class ReactiveElasticsearchConfig extends AbstractReactiveElasticsearchConfiguration {
+    @Override
+    public ReactiveElasticsearchClient reactiveElasticsearchClient() {
+        ClientConfiguration clientConfiguration = ClientConfiguration.builder()
+                .connectedTo("localhost:9200")
+                .build();
+        return ReactiveRestClients.create(clientConfiguration);
+    }
+}
+```
+## 创建Message Entity
+如果使用过Spring Data Mongo的小伙伴对下面的代码片段一定不陌生，很相似是不是。
+这里的Document注解里面的 indexName 指定了对应的ES中的index(早先的版本参数名为index，有小伙伴会问我这里没指定type啊，这是因为ES7开始已经取消type这个对应RDBMS中表概念的东西了。)
+这里我通过Lombok来帮我创建getter setter 以及无参数构造函数和全参数构造函数，省去了我自己对其进行编写。
+其中Id这个字段，我指定了不可为空，并且使用了Id这个注解。
+Field注解指定了要对应的ES类型（这里可以看前面关于ES的介绍，这里的类型是对应的）
+
+***实际运用中可以建一个BaseEntity，里面包含类似于创建者、创建时间、更新时间等通用属性，所有业务Entity都继承该Entity来避免重复代码。***
+```java
+/**
+ * @Author: zero
+ * @Date: 20200627
+ * The entity used for elastic search to save messages into index dalex;
+ * 对应ES index dalex
+ * ID 不可为空
+ * 通过Lombok创建getter setter 以及无参数构造函数和全参数构造函数
+ * 通过Field注解申明数据存入ES的类型以及解析器
+ * icon字段因为是路径地址故申明不建立索引
+ */
+@Document(indexName = "dalex")
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+public class Message {
+    @Id
+    @NonNull
+    private String id;
+    @Field(type = FieldType.Text, analyzer = "ik_max_word")
+    private String title;
+    @Field(type = FieldType.Text, analyzer = "ik_max_word", searchAnalyzer = "ik_max_word")
+    private String msg;
+    @Field(type = FieldType.Keyword)
+    private String sender;
+    @Field(type = FieldType.Integer)
+    private Integer type;
+    @Field(type = FieldType.Date, format = DateFormat.basic_date_time)
+    private Instant sendDate;
+    @Field(index = false)
+    private String icon;
+}
+```
+
+ik_max_word来自于ik分词器，这个需要我们自己添加扩展。
+## 编写Repository
+### MessageRepository
+关于方法的讲解，请参见代码注释，在最后的附录我们会提供接口里支持的查询
+```java
+/**
+ * 继承ElasticsearchRepository对Message进行实体数据映射操作
+ * ElasticsearchRepository 继承了 PagingAndSortingRepository
+ * 对一些条件查询方法简单列一些出来，实际使用中以此类推可进行扩展
+ *
+ */
+public interface MessageRepository extends ElasticsearchRepository <Message, String>{
+    //根据发送者返回消息列表，Pageable除了可以支持分页，也支持了排序
+    //{“bool” : {“must” : {“field” : {“name” : “?”}}}}
+    Page<Message> findBySender(String sender, Pageable pageable);
+
+    Page<Message> findByTitle(String title, Pageable pageable);
+
+    //通过Future异步获取数据，Top就是我们取数据集的第一条
+    @Async
+    Future<Message> findTopByMsg(String msg, Sort sort);
+
+    //复合查询条件，必须同时满足
+    //{“bool” : {“must” : [ {“field” : {“title” : “?”}}, {“field” : {“msg” : “?”}} ]}}
+    Page<Message> findByTitleAndMsg(String title, String msg, Pageable pageable);
+
+    //复合查询条件，满足其中之一
+    //{“bool” : {“should” : [ {“field” : {“title” : “?”}}, {“field” : {“msg” : “?”}} ]}}
+    Page<Message> findByTitleOrMsg(String title, String msg);
+}
+
+```
+### ReactiveMessageRepository
+这里主要是给大家大概演示一下如何通过响应式的Flux以及Mono进行ES的操作。
+关于方法的讲解，请参见代码注释。
+```java
+/**
+ * 通过Reactive进行Message操作
+ * 返回类型为 Flux<T> 或 Mono<T>
+ * ReactiveSortingRepository 继承了 ReactiveCrudRepository，所以我们直接继承ReactiveSortingRepository
+ * 在写法上除了返回类型不同，其它与MessageRepository类似
+ */
+public interface ReactiveMessageRepository extends ReactiveSortingRepository<Message, String> {
+    Flux<Message> findBySender(String sender, Pageable pageable);
+}
+```
+## ES的使用
+这里主要是介绍ES的使用，故我们也不做Service与Controller了，直接通过Junit来看看我们的Entity与Repository是否可用。
+
+我们先建立测试类
+
+```java
+@SpringBootTest
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+public class MessageTests {
+
+  @Autowired private MessageRepository msgRep;
+  @Autowired private ReactiveMessageRepository ractMsgRep;
+
+  final String tstId = "for-save-and-delete";
+  //消息类型的type临时赋值，在该用例中默认不会大于该值
+  int tmpType = 1000;
+
+  //每个用例执行前输出一行提示信息
+  @BeforeEach
+  void beforeTests(TestInfo testInfo) {
+    System.out.print(testInfo.getDisplayName() + " : 测试即将开始");
+  }
+}
+```
+
+现在我们已经有了一个基础的方法，为了让这个测试类在反复使用中不留下太多脏数据，所以我在测试方法的第一个执行的就是先清空我们的消息index。
+
+```java
+  //清空数据并验证数据条数是否已为0
+  @Order(0)
+  @Test
+  @DisplayName("清空所有数据")
+  void clearIndex() {
+    msgRep.deleteAll();
+    assertTrue(0 == msgRep.count(), "数据已清空完毕");
+  }
+```
+数据清空以后，我们插入一些初始数据为后面的删查改做准备，这里我注释了外部数据源，因为我的电脑对于csv文件会自动加密，这样代码就不好解析了，文件里的内容与我在代码中的内容是一样的。
+这里还可以使用@ConvertWith()来将数据直接转化为我们的一条message，但是这里就简单处理了，就像TDD，其实也是一步一步去完善，后面我们也可以讲讲如何去实践TDD。
+
+```java
+  @ParameterizedTest
+  @Order(1)
+  @CsvSource({
+    "陶渊明,盛年不重来，一日难再晨。及时宜自勉，岁月不待人。,陶渊明,1,https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1593064379767&di=c51c7e5e4cb68be7f81362efe43090de&imgtype=0&src=http%3A%2F%2Fp1.meituan.net%2Favatar%2F1d5b7593a0679ddc03240b9b6d7630fa77146.jpg",
+    "老子,千里之行，始于足下。,老子,2,https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1593064379767&di=c51c7e5e4cb68be7f81362efe43090de&imgtype=0&src=http%3A%2F%2Fp1.meituan.net%2Favatar%2F1d5b7593a0679ddc03240b9b6d7630fa77146.jpg",
+    "庄子,君子之交淡若水，小人之交甘若醴，君子淡以亲，小人甘以绝。,庄子,3,https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1593064379767&di=c51c7e5e4cb68be7f81362efe43090de&imgtype=0&src=http%3A%2F%2Fp1.meituan.net%2Favatar%2F1d5b7593a0679ddc03240b9b6d7630fa77146.jpg",
+    "2015年11月15日XX版本强势来袭！,亲爱的小伙伴，全新版本“逐鹿中原”将于2015年11月15日更新，将新增“逐鹿中原”功能，五大神将祝君争霸天下！,运营,4,https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1593064379767&di=c51c7e5e4cb68be7f81362efe43090de&imgtype=0&src=http%3A%2F%2Fp1.meituan.net%2Favatar%2F1d5b7593a0679ddc03240b9b6d7630fa77146.jpg",
+    "服务器停机维护公告,亲爱的各位小伙伴，为了给大家一个更好的游戏体验，服务器将于XX停服维护，预计维护时间1个小时，服务器开启时间将根据实际操作情况进行提前或者延顺，给您带来的不便请您谅解，感谢您对我们的理解与支持，祝您游戏愉快！,运营,5,https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1593064379767&di=c51c7e5e4cb68be7f81362efe43090de&imgtype=0&src=http%3A%2F%2Fp1.meituan.net%2Favatar%2F1d5b7593a0679ddc03240b9b6d7630fa77146.jpg",
+    "整治任务,全力整治县城和蔡家坡地区城镇环境卫生。对各路段、背街小巷和城乡结合部环境卫生以及乱搭乱建、乱停乱放、乱贴乱画、乱发传单广告等 “五乱”现象彻底整治，取缔所有马路市场、占道经营等行为，坚决消除乱倒垃圾、乱泼污水现象。,干部,6,https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1593064379767&di=c51c7e5e4cb68be7f81362efe43090de&imgtype=0&src=http%3A%2F%2Fp1.meituan.net%2Favatar%2F1d5b7593a0679ddc03240b9b6d7630fa77146.jpg"
+  })
+  // @CsvFileSource(resources = "/messages.csv")
+  @DisplayName("初始化数据")
+  void initTest(String title, String msg, String sender, Integer type, String icon) {
+    String uuid = UUID.randomUUID().toString();
+    Instant time = Instant.now();
+    Message message = new Message(uuid, title, msg, sender, type, time, icon);
+    //用响应式保存一条新的message并获取返回数据
+    Mono<Message> monoMsg = ractMsgRep.save(message);
+    Message savedMsg = monoMsg.block();
+    //对比存入后返回的数据与传入参数的诗句title是否一致
+    assertEquals(message.getTitle(), savedMsg.getTitle(), "Title一致");
+  }
+```
+插入数据后我们来看看我们现在一共有多少条数据：
+
+```java
+  @DisplayName("获取消息条数")
+  @Order(2)
+  @Test
+  void getMsgQuantity() {
+    // 通过响应式方式获取所有消息
+    Flux<Message> msg = ractMsgRep.findAll();
+    // 通过一般方式获取消息条数
+    long msgCount = msgRep.count();
+    System.out.println("共有消息，msg.count() ： " + msg.count().block().longValue());
+    System.out.println("共有消息，msgCount ： " + msgCount);
+    // 如果数据量特别多这个断言是会失败的，因为findAll如果不加分页，则其会默认最多1000条
+    assertTrue(
+        (msg.count().block().longValue() == msgCount), "消息条数符合预期");
+  }
+```
+接下来我们插入一条特定消息并在接下来对其做修改与删除：
+
+```java
+  @DisplayName("保存新的消息")
+  @Order(3)
+  @Test
+  void saveDoc() {
+    Message msg =
+        new Message(
+            tstId,
+            "who博士",
+            "和dalex对战了很多年",
+            "时间领主",
+            2,
+            Instant.now(),
+            "https://ss1.bdstatic.com/70cFuXSh_Q1YnxGkpoWK1HF6hhy/it/u=3919334208,37253891&fm=26&gp=0.jpg");
+    Message savedMsg = msgRep.save(msg);
+    assertAll(
+        "msg",
+        () -> assertEquals(savedMsg.getTitle(), msg.getTitle()),
+        () -> assertEquals(savedMsg.getSender(), msg.getSender()));
+  }
+
+  @DisplayName("更新消息")
+  @Order(4)
+  @Test
+  void updateMsg() {
+    Optional<Message> optionalMessage = msgRep.findById(tstId);
+    Message msg = optionalMessage.get();
+    String title = msg.getTitle();
+    String newTitle = "胡博士与宋江";
+    msg.setTitle(newTitle);
+    Message savedMsg = msgRep.save(msg);
+    assertAll(
+        "msg",
+        () -> assertEquals(savedMsg.getTitle(), newTitle),
+        () -> assertNotEquals(savedMsg.getTitle(), title),
+        () -> assertEquals(savedMsg.getId(), tstId));
+  }
+
+  @DisplayName("删除消息")
+  @Order(5)
+  @Test
+  void delMsg() {
+    // 看看该消息是否存在
+    boolean existMsgBeforeDel = msgRep.existsById(tstId);
+    // 删除该消息
+    msgRep.deleteById(tstId);
+    // 看看该消息是否还存在
+    boolean existMsgAfterDel = msgRep.existsById(tstId);
+    assertAll(
+        "exist msg", () -> assertTrue(existMsgBeforeDel), () -> assertFalse(existMsgAfterDel));
+  }
+```
+在最后我们查询一下所有运营发的消息，并进行分页和排序：
+
+```java
+@DisplayName("获取运营发的消息")
+@Order(7)
+@Test
+void getMesFromSenderOps() {
+  String sender = "运营";
+  Flux<Message> msgs =
+      ractMsgRep.findBySender(sender, PageRequest.of(0, 2, Sort.by("type").descending()));
+  System.out.println("消息共有: " + msgs.count().block().longValue());
+  msgs.toStream()
+      .forEach(
+          message -> {
+            System.out.println("发送者是: " + message.getSender());
+            System.out.println("消息是: " + message.getMsg());
+            System.out.println("类型是: " + message.getType());
+            System.out.println("tmp类型是: " + tmpType);
+            assertEquals(sender, message.getSender(), "发送者是: " + message.getSender());
+            assertTrue(tmpType >= message.getType());
+            tmpType = message.getType();
+          });
+}
+```
+到这里我们基本已经覆盖了通过Springboot 和 Spring Data Elasticsearch操作ES的常用用法。
+各种类型我们都举了一些例子，增删改查、分页、排序、异步、响应式。
+大家通过我们的简单例子可以触类旁通举一反三运用到自己的项目中。
+最后我们贴上一个附录，是Repository支持的各种方法，便于大家在项目中根据自己的情况使用。
+*如果你的查询特别特别复杂，那绝对是你的数据库设计有问题，不是因为你特别牛逼。*
+## 查询关键词
+Keyword|Sample|Elasticsearch Query String
+---- | --- | -------
+|And|findByNameAndPrice|{“bool” : {“must” : [ {“field” : {“name” : “?”}}, {“field” : {“price” : “?”}} ]}}|
+|Or|findByNameOrPrice|{“bool” : {“should” : [ {“field” : {“name” : “?”}}, {“field” : {“price” : “?”}} ]}}|
+|Is|findByName|{“bool” : {“must” : {“field” : {“name” : “?”}}}}|
+|Not|findByNameNot|{“bool” : {“must_not” : {“field” : {“name” : “?”}}}}|
+|Between|findByPriceBetween|{“bool” : {“must” : {“range” : {“price” : {“from” : ?,“to” : ?,“include_lower” : true,“include_upper” : true}}}}}|
+|LessThanEqual|findByPriceLessThan|{“bool” : {“must” : {“range” : {“price” : {“from” : null,“to” : ?,“include_lower” : true,“include_upper” : true}}}}}|
+|GreaterThanEqual|findByPriceGreaterThan|“bool” : {“must” : {“range” : {“price” : {“from” : ?,“to” : null,“include_lower” : true,“include_upper” : true}}}}}|
+|Before|findByPriceBefore|{“bool” : {“must” : {“range” : {“price” : {“from” : null,“to” : ?,“include_lower” : true,“include_upper” : true}}}}}|
+|After|findByPriceAfter|{“bool” : {“must” : {“range” : {“price” : {“from” : ?,“to” : null,“include_lower” : true,“include_upper” : true}}}}}|
+|Like|findByNameLike|{“bool” : {“must” : {“field” : {“name” : {“query” : “?*”,“analyze_wildcard” : true}}}}}|
+|StartingWith|findByNameStartingWith|{“bool” : {“must” : {“field” : {“name” : {“query” : “?*”,“analyze_wildcard” : true}}}}}|
+|EndingWith|findByNameEndingWith|{“bool” : {“must” : {“field” : {“name” : {“query” : “*?”,“analyze_wildcard” : true}}}}}|
+|Contains/Containing|findByNameContaining|{“bool” : {“must” : {“field” : {“name” : {“query” : “?”,“analyze_wildcard” : true}}}}}|
+|In|findByNameIn(Collection<String>names)|{“bool” : {“must” : {“bool” : {“should” : [ {“field” : {“name” : “?”}}, {“field” : {“name” : “?”}} ]}}}}|
+|NotIn|findByNameNotIn(Collection<String>names)|{“bool” : {“must_not” : {“bool” : {“should” : {“field” : {“name” : “?”}}}}}}|
+|Near|findByStoreNear|Not Supported Yet !|
+|True|findByAvailableTrue|{“bool” : {“must” : {“field” : {“available” : true}}}}|
+|False|findByAvailableFalse|{“bool” : {“must” : {“field” : {“available” : false}}}}|
+|OrderBy|findByAvailableTrueOrderByNameDesc|{“sort” : [{ “name” : {“order” : “desc”} }],“bool” : {“must” : {“field” : {“available” : true}}}}|
+
+最后该ES系列共4篇分享完结撒花。
+
+![在这里插入图片描述](https://imgconvert.csdnimg.cn/aHR0cHM6Ly90aW1nc2EuYmFpZHUuY29tL3RpbWc_aW1hZ2UmcXVhbGl0eT04MCZzaXplPWI5OTk5XzEwMDAwJnNlYz0xNTkzMzUzODMzOTYzJmRpPTdiNDM5MTljYjRiNDk2NDJmYjk2MjBkMjY1NWM4ODI4JmltZ3R5cGU9MCZzcmM9aHR0cDovL2ltZzMuaW1ndG4uYmRpbWcuY29tL2l0L3U9MjM4MTM5NDY4OCwxNzUxMjI1MDU0JmZtPTIxNCZncD0wLmpwZw?x-oss-process=image/format,png)

@@ -10,5 +10,3 @@ spring:
         reactive: localhost:9200
       repositories:
         enabled: true
-
-
